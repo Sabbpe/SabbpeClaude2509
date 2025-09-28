@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Upload, CheckCircle, AlertCircle, Loader2, CreditCard, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useBankValidation } from '@/hooks/useBankValidation';
+import { useMerchantData } from '@/hooks/useMerchantData';
 
 export interface BankDetailsData {
     ifscCode: string;
@@ -28,6 +29,7 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
     initialData
 }) => {
     const { toast } = useToast();
+    const { saveBankDetails, merchantProfile } = useMerchantData();
     const {
         validateIfscCode,
         validateAccountNumber,
@@ -175,10 +177,26 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
             return;
         }
 
+        if (!merchantProfile) {
+            toast({
+                variant: "destructive",
+                title: "Error",
+                description: "Merchant profile not found",
+            });
+            return;
+        }
+
         setIsSubmitting(true);
 
         try {
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
+            // Actually save to database
+            await saveBankDetails({
+                merchant_id: merchantProfile.id,
+                account_number: formData.accountNumber,
+                ifsc_code: formData.ifscCode,
+                bank_name: ifscValidation.bankName || 'Unknown',
+                account_holder_name: formData.accountHolderName,
+            });
 
             toast({
                 title: "Bank Details Saved",
@@ -187,10 +205,11 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
 
             onNext(formData);
         } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to save';
             toast({
                 variant: "destructive",
                 title: "Save Failed",
-                description: "Failed to save bank details. Please try again.",
+                description: message,
             });
         } finally {
             setIsSubmitting(false);

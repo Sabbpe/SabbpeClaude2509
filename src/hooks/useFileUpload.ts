@@ -1,6 +1,6 @@
 // hooks/useFileUpload.ts
 import { useState, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useToast } from './use-toast';
 
 interface UploadProgress {
@@ -46,7 +46,7 @@ export const useFileUpload = () => {
             toast({
                 variant: "destructive",
                 title: "Upload failed",
-                description: validation.error,
+                description: validation.error || 'Invalid file',
             });
             return null;
         }
@@ -77,16 +77,19 @@ export const useFileUpload = () => {
             });
 
             return data;
-        } catch (error: any) {
+        } catch (error) {
+            // Type-safe error message extraction
+            const errorMessage = error instanceof Error ? error.message : 'Upload failed';
+
             setUploads(prev => ({
                 ...prev,
-                [uploadId]: { progress: 0, uploading: false, error: error.message }
+                [uploadId]: { progress: 0, uploading: false, error: errorMessage }
             }));
 
             toast({
                 variant: "destructive",
                 title: "Upload failed",
-                description: error.message,
+                description: errorMessage,
             });
 
             return null;

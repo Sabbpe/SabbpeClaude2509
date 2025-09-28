@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useToast } from '@/hooks/use-toast';
 
+// Updated to match actual database schema
 export interface MerchantProfile {
     id: string;
     user_id: string;
@@ -13,7 +14,15 @@ export interface MerchantProfile {
     aadhaar_number?: string;
     business_name?: string;
     gst_number?: string;
-    onboarding_status: 'pending' | 'in_progress' | 'verified' | 'rejected';
+    entity_type?: string | null;
+    distributor_id?: string | null;
+    invitation_token?: string | null;
+    invited_via?: string | null;
+    reviewed_by?: string | null;
+    reviewed_at?: string | null;
+    rejection_reason?: string | null;
+    risk_level?: string | null;
+    onboarding_status: 'pending' | 'in_progress' | 'verified' | 'rejected' | 'approved' | 'submitted';
     created_at: string;
     updated_at: string;
 }
@@ -61,7 +70,6 @@ export const useMerchantData = () => {
     const [kycData, setKycData] = useState<KYCData | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // Improved fetchMerchantProfile with abort controller
     const fetchMerchantProfile = useCallback(async () => {
         if (!user) return;
 
@@ -79,17 +87,15 @@ export const useMerchantData = () => {
             if (error) throw error;
 
             if (profile) {
-                setMerchantProfile(profile);
-                // Fetch related data in parallel
+                setMerchantProfile(profile as MerchantProfile);
                 await Promise.all([
                     fetchBankDetails(profile.id, abortController.signal),
                     fetchDocuments(profile.id, abortController.signal),
                     fetchKYCData(profile.id, abortController.signal),
                 ]);
             }
-        } catch (error: any) {
-            // Don't show error toast if request was aborted (component unmounted)
-            if (error.name !== 'AbortError') {
+        } catch (error) {
+            if (error instanceof Error && error.name !== 'AbortError') {
                 toast({
                     variant: "destructive",
                     title: "Error fetching profile",
@@ -97,17 +103,14 @@ export const useMerchantData = () => {
                 });
             }
         } finally {
-            // Only update loading state if request wasn't aborted
             if (!abortController.signal.aborted) {
                 setLoading(false);
             }
         }
 
-        // Return cleanup function
         return () => abortController.abort();
     }, [user, toast]);
 
-    // Updated helper functions to accept abort signal
     const fetchBankDetails = async (merchantId: string, signal?: AbortSignal) => {
         const { data, error } = await supabase
             .from('merchant_bank_details')
@@ -121,7 +124,6 @@ export const useMerchantData = () => {
             return;
         }
 
-        // Only update state if request wasn't aborted
         if (!signal?.aborted) {
             setBankDetails(data);
         }
@@ -139,7 +141,6 @@ export const useMerchantData = () => {
             return;
         }
 
-        // Only update state if request wasn't aborted
         if (!signal?.aborted) {
             setDocuments(data || []);
         }
@@ -158,13 +159,11 @@ export const useMerchantData = () => {
             return;
         }
 
-        // Only update state if request wasn't aborted
         if (!signal?.aborted) {
             setKycData(data);
         }
     };
 
-    // Effect with cleanup
     useEffect(() => {
         let cleanup: (() => void) | undefined;
 
@@ -174,7 +173,6 @@ export const useMerchantData = () => {
             });
         }
 
-        // Cleanup function to abort requests if component unmounts
         return () => {
             if (cleanup) {
                 cleanup();
@@ -195,16 +193,17 @@ export const useMerchantData = () => {
 
             if (error) throw error;
 
-            setMerchantProfile(data);
+            setMerchantProfile(data as MerchantProfile);
             toast({
                 title: "Profile updated",
                 description: "Your profile has been updated successfully.",
             });
-        } catch (error: any) {
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update profile';
             toast({
                 variant: "destructive",
                 title: "Error updating profile",
-                description: error.message,
+                description: message,
             });
         }
     };
@@ -229,11 +228,12 @@ export const useMerchantData = () => {
                 title: "Bank details saved",
                 description: "Your bank details have been saved successfully.",
             });
-        } catch (error: any) {
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to save bank details';
             toast({
                 variant: "destructive",
                 title: "Error saving bank details",
-                description: error.message,
+                description: message,
             });
         }
     };
@@ -272,11 +272,12 @@ export const useMerchantData = () => {
                 title: "Document uploaded",
                 description: `${documentType.replace('_', ' ').toUpperCase()} has been uploaded successfully.`,
             });
-        } catch (error: any) {
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to upload document';
             toast({
                 variant: "destructive",
                 title: "Error uploading document",
-                description: error.message,
+                description: message,
             });
         }
     };
@@ -301,11 +302,12 @@ export const useMerchantData = () => {
                 title: "KYC data updated",
                 description: "Your KYC information has been updated successfully.",
             });
-        } catch (error: any) {
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update KYC data';
             toast({
                 variant: "destructive",
                 title: "Error updating KYC data",
-                description: error.message,
+                description: message,
             });
         }
     };

@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 // Supabase client (replace with your actual values)
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 
 interface ExtractedData {
     panNumber?: string;
@@ -1013,6 +1013,32 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
                     )}
                 </div>
             </div>
+            <div className="mb-6">
+                <label className="block text-gray-700 font-medium mb-3">Business Type</label>
+                <div className="flex flex-col gap-3">
+                    <label className="flex items-center space-x-2">
+                        <input type="radio" name="businessType" value="individual" className="form-radio text-blue-600" />
+                        <span>Individual</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                        <input type="radio" name="businessType" value="proprietor" className="form-radio text-blue-600" />
+                        <span>Proprietor</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                        <input type="radio" name="businessType" value="partnership" className="form-radio text-blue-600" />
+                        <span>Partnership</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                        <input type="radio" name="businessType" value="privatePublic" className="form-radio text-blue-600" />
+                        <span>Private/Public Limited</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                        <input type="radio" name="businessType" value="others" className="form-radio text-blue-600" />
+                        <span>Others</span>
+                    </label>
+                </div>
+            </div>
+
 
             {/* Supporting Documents */}
             <div className="space-y-4">

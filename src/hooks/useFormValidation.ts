@@ -1,80 +1,71 @@
-// hooks/useFormValidation.ts
-import { useState, useCallback } from 'react';
-import { z } from 'zod';
+import { useState } from 'react';
+import { z, ZodObject, ZodRawShape } from 'zod';
 
-type ValidationErrors = Record<string, string[]>;
+// Change the generic constraint to ZodObject instead of ZodType
+export const useFormValidation = <T extends ZodRawShape>(
+    schema: ZodObject<T>
+) => {
+    const [errors, setErrors] = useState<Record<string, string>>({});
 
-export const useFormValidation = <T>(schema: z.ZodSchema<T>) => {
-    const [errors, setErrors] = useState<ValidationErrors>({});
-
-    const validateField = useCallback((field: string, value: any) => {
+    const validateField = (field: string, value: unknown): boolean => {
         try {
-            // Create a partial schema for single field validation
-            const fieldSchema = z.object({ [field]: schema.shape[field as keyof typeof schema.shape] });
+            // Now TypeScript knows schema has .shape
+            const fieldSchema = z.object({
+                [field]: schema.shape[field as keyof T]
+            });
             fieldSchema.parse({ [field]: value });
 
-            // Clear error if validation passes
             setErrors(prev => {
-                const { [field]: _, ...rest } = prev;
-                return rest;
+                const newErrors = { ...prev };
+                delete newErrors[field];
+                return newErrors;
             });
-
             return true;
         } catch (error) {
             if (error instanceof z.ZodError) {
                 setErrors(prev => ({
                     ...prev,
-                    [field]: error.errors.map(e => e.message)
+                    [field]: error.errors[0]?.message || 'Invalid value'
                 }));
             }
             return false;
         }
-    }, [schema]);
+    };
 
-    const validateForm = useCallback((data: Partial<T>) => {
+    const validateAll = (data: z.infer<typeof schema>): boolean => {
         try {
             schema.parse(data);
             setErrors({});
-            return { valid: true, errors: {} };
+            return true;
         } catch (error) {
             if (error instanceof z.ZodError) {
-                const formattedErrors: ValidationErrors = {};
+                const newErrors: Record<string, string> = {};
                 error.errors.forEach(err => {
-                    const field = err.path.join('.');
-                    if (!formattedErrors[field]) {
-                        formattedErrors[field] = [];
+                    if (err.path[0]) {
+                        newErrors[err.path[0].toString()] = err.message;
                     }
-                    formattedErrors[field].push(err.message);
                 });
-                setErrors(formattedErrors);
-                return { valid: false, errors: formattedErrors };
+                setErrors(newErrors);
             }
-            return { valid: false, errors: {} };
+            return false;
         }
-    }, [schema]);
+    };
 
-    const clearErrors = useCallback(() => {
-        setErrors({});
-    }, []);
+    const clearErrors = () => setErrors({});
 
-    const clearFieldError = useCallback((field: string) => {
+    const clearFieldError = (field: string) => {
         setErrors(prev => {
-            const { [field]: _, ...rest } = prev;
-            return rest;
+            const newErrors = { ...prev };
+            delete newErrors[field];
+            return newErrors;
         });
-    }, []);
-
-    const getFieldError = useCallback((field: string) => {
-        return errors[field]?.[0] || null;
-    }, [errors]);
+    };
 
     return {
         errors,
         validateField,
-        validateForm,
+        validateAll,
         clearErrors,
-        clearFieldError,
-        getFieldError,
-        hasErrors: Object.keys(errors).length > 0,
+        clearFieldError
     };
 };

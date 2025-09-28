@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 // Supabase client (replace with your actual values)
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 
 interface ExtractedData {
     panNumber?: string;
