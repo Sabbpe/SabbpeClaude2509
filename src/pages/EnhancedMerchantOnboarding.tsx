@@ -302,7 +302,7 @@ const EnhancedOnboardingFlow: React.FC = () => {
             const { data: merchantData, error: merchantError } = await supabase
                 .from('merchant_profiles')
                 .update({
-                    onboarding_status: 'submitted',
+                    onboarding_status: 'verified',
                     full_name: onboardingData.fullName,
                     business_name: onboardingData.businessName,
                     pan_number: onboardingData.panNumber,
@@ -346,7 +346,7 @@ const EnhancedOnboardingFlow: React.FC = () => {
                 .from('merchant_kyc')
                 .upsert({
                     merchant_id: merchantData.id,
-                    is_video_completed: onboardingData.kycData.isVideoCompleted,
+                    
                     selfie_url: onboardingData.kycData.selfieUrl,
                     location_verified: onboardingData.kycData.locationVerified,
                     kyc_status: 'pending',
