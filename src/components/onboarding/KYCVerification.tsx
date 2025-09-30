@@ -79,32 +79,32 @@ export const KYCVerification: React.FC<KYCVerificationProps> = ({
             const context = canvas.getContext('2d');
 
             if (context) {
-                // Set canvas dimensions to match video
                 canvas.width = videoRef.current.videoWidth;
                 canvas.height = videoRef.current.videoHeight;
-
-                // Draw current video frame to canvas
                 context.drawImage(videoRef.current, 0, 0);
 
-                // Convert to blob
                 canvas.toBlob(async (blob) => {
                     if (blob && merchantProfile) {
-                        // Create file from blob
                         const file = new File([blob], 'kyc-selfie.jpg', { type: 'image/jpeg' });
-
-                        // Upload to Supabase
                         const uploadPath = `${merchantProfile.user_id}/kyc-selfie-${Date.now()}.jpg`;
                         const uploadResult = await uploadFile(file, 'merchant-documents', uploadPath);
 
                         if (uploadResult) {
-                            // Update KYC state
                             const selfieUrl = completeVideoKYC(blob);
 
-                            // Update database
                             await updateKYCData({
                                 video_kyc_completed: true,
                                 selfie_file_path: uploadPath,
                                 kyc_status: 'uploaded'
+                            });
+
+                            // UPDATE PARENT DATA
+                            onDataChange?.({
+                                kycData: {
+                                    ...data?.kycData,
+                                    isVideoCompleted: true,
+                                    selfieUrl: uploadPath
+                                }
                             });
 
                             toast({
@@ -141,6 +141,16 @@ export const KYCVerification: React.FC<KYCVerificationProps> = ({
                     longitude: locationData.lng,
                 });
             }
+
+            // UPDATE PARENT DATA
+            onDataChange?.({
+                kycData: {
+                    ...data?.kycData,
+                    locationVerified: true,
+                    latitude: locationData.lat,
+                    longitude: locationData.lng
+                }
+            });
 
             toast({
                 title: "Location Captured",

@@ -24,6 +24,7 @@ export interface OnboardingData {
     aadhaarNumber: string;
     businessName: string;
     gstNumber: string;
+    hasGST: boolean;
     bankDetails: {
         accountNumber: string;
         ifscCode: string;
@@ -34,13 +35,15 @@ export interface OnboardingData {
         isVideoCompleted: boolean;
         selfieUrl?: string;
         locationVerified?: boolean;
+        latitude?: number;
+        longitude?: number;
     };
     documents: {
-        panCard?: File;
-        aadhaarCard?: File;
-        gstCertificate?: File;
-        cancelledCheque?: File;
-        [key: string]: File | undefined;
+        panCard?: { file: File; path: string };
+        aadhaarCard?: { file: File; path: string };
+        cancelledCheque?: { file: File; path: string };
+        businessProof?: { file: File; path: string };
+        [key: string]: { file: File; path: string } | undefined;
     };
     agreementAccepted: boolean;
     currentStep: number;
@@ -119,7 +122,8 @@ const SuccessPopup: React.FC<{ isOpen: boolean; onClose: () => void; onGoToDashb
                         <div className="text-sm text-gray-600 text-left">
                             <p className="font-medium mb-2">What happens next:</p>
                             <ul className="space-y-1">
-                                <li>• Review within 24-48 hours</li>
+                                <li>• Validation within 5-10 minutes</li>
+                                <li>• Bank API processing 24-48 hours</li>
                                 <li>• Email confirmation sent</li>
                                 <li>• Account activation once approved</li>
                             </ul>
@@ -144,10 +148,23 @@ const EnhancedOnboardingFlow: React.FC = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const [onboardingData, setOnboardingData] = useState<OnboardingData>({
-        fullName: '', mobileNumber: '', email: '', panNumber: '', aadhaarNumber: '',
-        businessName: '', gstNumber: '',
-        bankDetails: { accountNumber: '', ifscCode: '', bankName: '', accountHolderName: '' },
-        kycData: { isVideoCompleted: false },
+        fullName: '',
+        mobileNumber: '',
+        email: '',
+        panNumber: '',
+        aadhaarNumber: '',
+        businessName: '',
+        gstNumber: '',
+        hasGST: true,
+        bankDetails: {
+            accountNumber: '',
+            ifscCode: '',
+            bankName: '',
+            accountHolderName: ''
+        },
+        kycData: {
+            isVideoCompleted: false
+        },
         documents: {},
         agreementAccepted: false,
         currentStep: 0,
@@ -179,7 +196,6 @@ const EnhancedOnboardingFlow: React.FC = () => {
         setOnboardingData(prev => ({ ...prev, ...newData }));
     };
 
-    // Save registration data to Supabase after registration step
     const saveRegistrationData = async () => {
         if (!user?.id) {
             console.error('No user ID found');
@@ -191,7 +207,8 @@ const EnhancedOnboardingFlow: React.FC = () => {
 
             const { error } = await supabase
                 .from('merchant_profiles')
-                .update({
+                .upsert({
+                    user_id: user.id,
                     full_name: onboardingData.fullName,
                     mobile_number: onboardingData.mobileNumber,
                     email: onboardingData.email,
@@ -199,9 +216,11 @@ const EnhancedOnboardingFlow: React.FC = () => {
                     aadhaar_number: onboardingData.aadhaarNumber,
                     business_name: onboardingData.businessName,
                     gst_number: onboardingData.gstNumber,
+                    onboarding_status: 'in_progress',
                     updated_at: new Date().toISOString(),
-                })
-                .eq('user_id', user.id);
+                }, {
+                    onConflict: 'user_id'
+                });
 
             if (error) {
                 console.error('Failed to save registration data:', error);
@@ -221,20 +240,20 @@ const EnhancedOnboardingFlow: React.FC = () => {
         }
     };
 
-    // Custom next step handler that saves data first
     const handleNextStep = async () => {
-        // Save data when leaving registration step
         if (currentStep === 'registration') {
             const saved = await saveRegistrationData();
             if (!saved) {
-                return; // Don't proceed if save failed
+                return;
             }
         }
         nextStep();
     };
 
     const [, setSavedProgress] = useLocalStorage('onboarding-progress', {
-        currentStep, completedAt: null, lastUpdated: new Date().toISOString(),
+        currentStep,
+        completedAt: null,
+        lastUpdated: new Date().toISOString(),
     });
 
     React.useEffect(() => {
@@ -252,12 +271,15 @@ const EnhancedOnboardingFlow: React.FC = () => {
 
         console.log('Restoring step based on profile status:', merchantProfile.onboarding_status);
 
-        // If application is verified or approved - show dashboard
-        if (merchantProfile.onboarding_status === 'verified' ||
-            merchantProfile.onboarding_status === 'approved') {
+        const status = merchantProfile.onboarding_status;
+
+        if (status === 'approved' || status === 'verified') {
             goToStep('dashboard');
+        } else if (status === 'submitted' || status === 'in_progress' || status === 'validating' || status === 'pending_bank_approval') {
+            goToStep('dashboard');
+        } else if (status === 'validation_failed' || status === 'rejected' || status === 'bank_rejected') {
+            goToStep('review');
         } else {
-            // Still in progress - restore to appropriate step
             const hasPersonalInfo = Boolean(
                 merchantProfile.pan_number &&
                 merchantProfile.aadhaar_number &&
@@ -289,20 +311,66 @@ const EnhancedOnboardingFlow: React.FC = () => {
         setIsSubmitting(true);
 
         try {
-            toast({
-                title: "Submitting Application",
-                description: "Please wait while we process your onboarding details...",
+            const validationErrors: string[] = [];
+
+            if (!onboardingData.fullName) validationErrors.push('Full name is required');
+            if (!onboardingData.email) validationErrors.push('Email is required');
+            if (!onboardingData.mobileNumber) validationErrors.push('Mobile number is required');
+            if (!onboardingData.panNumber) validationErrors.push('PAN number is required');
+            if (!onboardingData.aadhaarNumber) validationErrors.push('Aadhaar number is required');
+            if (!onboardingData.businessName) validationErrors.push('Business name is required');
+
+            if (!onboardingData.bankDetails.accountNumber || onboardingData.bankDetails.accountNumber.trim() === '') {
+                validationErrors.push('Bank account number is required');
+            }
+            if (!onboardingData.bankDetails.ifscCode || onboardingData.bankDetails.ifscCode.trim() === '') {
+                validationErrors.push('IFSC code is required');
+            }
+            if (!onboardingData.bankDetails.bankName || onboardingData.bankDetails.bankName.trim() === '') {
+                validationErrors.push('Bank name is required');
+            }
+            if (!onboardingData.bankDetails.accountHolderName || onboardingData.bankDetails.accountHolderName.trim() === '') {
+                validationErrors.push('Account holder name is required');
+            }
+
+            if (!onboardingData.kycData.isVideoCompleted) {
+                validationErrors.push('Video KYC must be completed');
+            }
+            if (!onboardingData.kycData.locationVerified) {
+                validationErrors.push('Location must be verified');
+            }
+
+            const requiredDocs = ['panCard', 'aadhaarCard', 'cancelledCheque'];
+            requiredDocs.forEach(doc => {
+                if (!onboardingData.documents[doc]) {
+                    validationErrors.push(`${doc.replace(/([A-Z])/g, ' $1').trim()} is required`);
+                }
             });
+
+            if (validationErrors.length > 0) {
+                toast({
+                    variant: "destructive",
+                    title: "Validation Failed",
+                    description: validationErrors.join('; ')
+                });
+                setIsSubmitting(false);
+                return;
+            }
 
             if (!user?.id) {
                 throw new Error('User not authenticated');
             }
 
-            // 1. Update merchant profile status to 'submitted'
+            toast({
+                title: "Submitting Application",
+                description: "Please wait while we process your onboarding details...",
+            });
+
+            // 1. Insert/Update merchant profile
             const { data: merchantData, error: merchantError } = await supabase
                 .from('merchant_profiles')
-                .update({
-                    onboarding_status: 'verified',
+                .upsert({
+                    user_id: user.id,
                     full_name: onboardingData.fullName,
                     business_name: onboardingData.businessName,
                     pan_number: onboardingData.panNumber,
@@ -310,18 +378,21 @@ const EnhancedOnboardingFlow: React.FC = () => {
                     gst_number: onboardingData.gstNumber,
                     email: onboardingData.email,
                     mobile_number: onboardingData.mobileNumber,
+                    onboarding_status: 'pending',
+                    updated_at: new Date().toISOString(),
+                }, {
+                    onConflict: 'user_id'
                 })
-                .eq('user_id', user.id)
                 .select()
                 .single();
 
-            if (merchantError) {
-                throw new Error(`Merchant update failed: ${merchantError.message}`);
+            if (merchantError || !merchantData) {
+                throw new Error(`Merchant profile failed: ${merchantError?.message}`);
             }
 
-            console.log('Merchant status updated:', merchantData);
+            console.log('Merchant profile created/updated:', merchantData.id);
 
-            // 2. Update or insert bank details
+            // 2. Insert/Update bank details
             const { error: bankError } = await supabase
                 .from('merchant_bank_details')
                 .upsert({
@@ -336,19 +407,65 @@ const EnhancedOnboardingFlow: React.FC = () => {
                 });
 
             if (bankError) {
-                throw new Error(`Bank details update failed: ${bankError.message}`);
+                throw new Error(`Bank details failed: ${bankError.message}`);
             }
 
             console.log('Bank details saved');
 
-            // 3. Update KYC data if needed
+            // 3. Insert documents
+            const docTypeMap: Record<string, string> = {
+                'panCard': 'pan_card',
+                'aadhaarCard': 'aadhaar_card',
+                'cancelledCheque': 'cancelled_cheque',
+                'businessProof': 'business_proof'
+            };
+
+            const documentInserts = [];
+            for (const [docKey, docData] of Object.entries(onboardingData.documents)) {
+                if (docData && docData.file && docData.path) {
+                    const docType = docTypeMap[docKey];
+                    if (docType) {
+                        documentInserts.push({
+                            merchant_id: merchantData.id,
+                            document_type: docType,
+                            file_name: docData.file.name,
+                            file_path: docData.path,
+                            file_size: docData.file.size,
+                            mime_type: docData.file.type,
+                            status: 'uploaded',
+                            uploaded_at: new Date().toISOString()
+                        });
+                    }
+                }
+            }
+
+            if (documentInserts.length > 0) {
+                // Delete existing documents first
+                await supabase
+                    .from('merchant_documents')
+                    .delete()
+                    .eq('merchant_id', merchantData.id);
+
+                const { error: docsError } = await supabase
+                    .from('merchant_documents')
+                    .insert(documentInserts);
+
+                if (docsError) {
+                    throw new Error(`Documents insert failed: ${docsError.message}`);
+                }
+                console.log(`${documentInserts.length} documents inserted`);
+            }
+
+            // 4. Insert/Update KYC
             const { error: kycError } = await supabase
                 .from('merchant_kyc')
                 .upsert({
                     merchant_id: merchantData.id,
-                    
-                    selfie_url: onboardingData.kycData.selfieUrl,
-                    location_verified: onboardingData.kycData.locationVerified,
+                    video_kyc_completed: onboardingData.kycData.isVideoCompleted,
+                    selfie_file_path: onboardingData.kycData.selfieUrl,
+                    location_captured: onboardingData.kycData.locationVerified || false,
+                    latitude: onboardingData.kycData.latitude,
+                    longitude: onboardingData.kycData.longitude,
                     kyc_status: 'pending',
                     updated_at: new Date().toISOString(),
                 }, {
@@ -361,36 +478,26 @@ const EnhancedOnboardingFlow: React.FC = () => {
 
             console.log('KYC data saved');
 
-            // 4. Upload documents if any
-            if (onboardingData.documents.panCard) {
-                const fileName = `${merchantData.id}/pan_card_${Date.now()}.pdf`;
-                const { error: uploadError } = await supabase.storage
-                    .from('merchant-documents')
-                    .upload(fileName, onboardingData.documents.panCard);
+            // 5. FINAL STEP: Change status to 'submitted' to trigger backend webhook
+            const { error: statusError } = await supabase
+                .from('merchant_profiles')
+                .update({
+                    onboarding_status: 'submitted',
+                    submitted_at: new Date().toISOString(),
+                })
+                .eq('id', merchantData.id);
 
-                if (!uploadError) {
-                    await supabase.from('merchant_documents').insert({
-                        merchant_id: merchantData.id,
-                        document_type: 'pan_card',
-                        file_name: onboardingData.documents.panCard.name,
-                        file_path: fileName,
-                        file_size: onboardingData.documents.panCard.size,
-                        uploaded_at: new Date().toISOString(),
-                    });
-                }
+            if (statusError) {
+                throw new Error(`Status update failed: ${statusError.message}`);
             }
 
-            // Repeat for other documents as needed...
+            console.log('Status changed to submitted - backend webhook triggered');
 
-            // 5. Update local state
-            setOnboardingData(prev => ({ ...prev, agreementAccepted: true }));
-
-            // 6. Show success popup
             setShowSuccessPopup(true);
 
             toast({
                 title: "Application Submitted Successfully!",
-                description: "Your application has been submitted for review.",
+                description: "Your application is being processed by the backend.",
             });
 
         } catch (error) {
@@ -398,12 +505,43 @@ const EnhancedOnboardingFlow: React.FC = () => {
             toast({
                 variant: "destructive",
                 title: "Submission Failed",
-                description: error instanceof Error ? error.message : "There was an error submitting your application. Please try again.",
+                description: error instanceof Error ? error.message : "Please try again.",
             });
         } finally {
             setIsSubmitting(false);
         }
     };
+
+    useEffect(() => {
+        if (!user?.id || !merchantProfile?.id) return;
+
+        const channel = supabase
+            .channel('merchant-status-changes')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'merchant_profiles',
+                    filter: `id=eq.${merchantProfile.id}`
+                },
+                (payload) => {
+                    const newStatus = (payload.new as MerchantProfile).onboarding_status;
+
+                    console.log('Status changed to:', newStatus);
+
+                    toast({
+                        title: "Status Updated",
+                        description: `Application status: ${newStatus?.replace('_', ' ')}`,
+                    });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [user?.id, merchantProfile?.id, toast]);
 
     if (profileLoading) {
         return (
@@ -444,7 +582,7 @@ const EnhancedOnboardingFlow: React.FC = () => {
         if (stepExists) {
             goToStep(stepId as OnboardingStep);
         } else {
-            console.warn(`Step "${stepId}" does not exist in ONBOARDING_STEPS`);
+            console.warn(`Step "${stepId}" does not exist`);
         }
     };
 
@@ -534,8 +672,7 @@ const EnhancedOnboardingFlow: React.FC = () => {
                     <div>Current Step: {currentStep}</div>
                     <div>Progress: {Math.round(progress)}%</div>
                     <div>Is Submitting: {isSubmitting ? 'Yes' : 'No'}</div>
-                    <div>Full Name: {onboardingData.fullName}</div>
-                    <div>Email: {onboardingData.email}</div>
+                    <div>Status: {merchantProfile?.onboarding_status || 'N/A'}</div>
                     <div>User ID: {user?.id || 'Not logged in'}</div>
                 </div>
             )}

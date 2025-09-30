@@ -428,8 +428,19 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
 
     // Upload to Supabase
     const uploadToSupabase = async (file: File, folder: string): Promise<string> => {
+        const {
+            data: { user },
+            error: userError,
+        } = await supabase.auth.getUser();
+        if (userError || !user) {
+            throw new Error("User not authenticated");
+        }
+        const safePhone = user?.phone
+            ? user.phone.replace(/\D/g, "") // strip spaces, +, -
+            : "unknown";
+        const userId = user.id;
         const fileName = `${Date.now()}_${file.name}`;
-        const filePath = `${folder}/${fileName}`;
+        const filePath = `${userId}_${safePhone}/${folder}/${fileName}`;
 
         const { data, error } = await supabase.storage
             .from('merchant-documents')
@@ -479,7 +490,6 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
         const file = event.target.files?.[0];
         if (!file) return;
 
-        // Initialize state
         setPanDocument({
             file,
             uploadStatus: 'uploading',
@@ -487,7 +497,6 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
             ocrProgress: 0
         });
 
-        // Start upload and OCR in parallel
         const uploadPromise = uploadToSupabase(file, 'pan-cards');
         const ocrPromise = ocrService.processDocument(file, (progress) => {
             setPanDocument(prev => ({ ...prev, ocrProgress: progress }));
@@ -495,8 +504,6 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
 
         try {
             const results = await Promise.allSettled([uploadPromise, ocrPromise]);
-
-            // Handle upload result
             const uploadResult = results[0];
             const ocrResult = results[1];
 
@@ -509,44 +516,30 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
 
             if (uploadResult.status === 'fulfilled') {
                 finalState.uploadPath = uploadResult.value;
-                console.log('PAN card uploaded to:', uploadResult.value);
+
+                // UPDATE PARENT WITH PATH
+                onDataChange?.({
+                    documents: {
+                        ...data?.documents,
+                        panCard: { file, path: uploadResult.value }
+                    }
+                });
             } else {
                 finalState.uploadError = 'Upload failed';
-                console.error('Upload failed:', uploadResult.reason);
             }
 
             if (ocrResult.status === 'fulfilled') {
                 applyOCRResults(ocrResult.value, 'pan');
-
-                // Show success toast
-                if (uploadResult.status === 'fulfilled') {
-                    toast({
-                        title: "PAN Card Processed Successfully",
-                        description: `File uploaded and data extracted (${ocrResult.value.confidence}% confidence)`,
-                    });
-                } else {
-                    toast({
-                        title: "OCR Completed",
-                        description: "Data extracted but upload failed. Please try uploading again.",
-                        variant: "destructive"
-                    });
-                }
+                toast({
+                    title: "PAN Card Processed Successfully",
+                    description: `File uploaded and data extracted (${ocrResult.value.confidence}% confidence)`,
+                });
             } else {
                 finalState.ocrError = ocrResult.reason instanceof Error ? ocrResult.reason.message : 'OCR failed';
-                console.error('OCR failed:', ocrResult.reason);
-
-                // Show appropriate toast based on upload success
                 if (uploadResult.status === 'fulfilled') {
                     toast({
                         title: "File Uploaded Successfully",
                         description: "PAN card uploaded but OCR failed. Please enter details manually.",
-                        variant: "default"
-                    });
-                } else {
-                    toast({
-                        title: "Processing Failed",
-                        description: "Both upload and OCR failed. Please try again.",
-                        variant: "destructive"
                     });
                 }
             }
@@ -568,14 +561,13 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
                 description: "An unexpected error occurred. Please try again.",
             });
         }
-    }, [applyOCRResults, toast]);
+    }, [applyOCRResults, toast, data?.documents, onDataChange]);
 
     // Handle Aadhaar upload and OCR
     const handleAadhaarUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
 
-        // Initialize state
         setAadhaarDocument({
             file,
             uploadStatus: 'uploading',
@@ -583,7 +575,6 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
             ocrProgress: 0
         });
 
-        // Start upload and OCR in parallel
         const uploadPromise = uploadToSupabase(file, 'aadhaar-cards');
         const ocrPromise = ocrService.processDocument(file, (progress) => {
             setAadhaarDocument(prev => ({ ...prev, ocrProgress: progress }));
@@ -591,8 +582,6 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
 
         try {
             const results = await Promise.allSettled([uploadPromise, ocrPromise]);
-
-            // Handle upload result
             const uploadResult = results[0];
             const ocrResult = results[1];
 
@@ -605,44 +594,30 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
 
             if (uploadResult.status === 'fulfilled') {
                 finalState.uploadPath = uploadResult.value;
-                console.log('Aadhaar card uploaded to:', uploadResult.value);
+
+                // UPDATE PARENT WITH PATH
+                onDataChange?.({
+                    documents: {
+                        ...data?.documents,
+                        aadhaarCard: { file, path: uploadResult.value }
+                    }
+                });
             } else {
                 finalState.uploadError = 'Upload failed';
-                console.error('Upload failed:', uploadResult.reason);
             }
 
             if (ocrResult.status === 'fulfilled') {
                 applyOCRResults(ocrResult.value, 'aadhaar');
-
-                // Show success toast
-                if (uploadResult.status === 'fulfilled') {
-                    toast({
-                        title: "Aadhaar Card Processed Successfully",
-                        description: `File uploaded and data extracted (${ocrResult.value.confidence}% confidence)`,
-                    });
-                } else {
-                    toast({
-                        title: "OCR Completed",
-                        description: "Data extracted but upload failed. Please try uploading again.",
-                        variant: "destructive"
-                    });
-                }
+                toast({
+                    title: "Aadhaar Card Processed Successfully",
+                    description: `File uploaded and data extracted (${ocrResult.value.confidence}% confidence)`,
+                });
             } else {
                 finalState.ocrError = ocrResult.reason instanceof Error ? ocrResult.reason.message : 'OCR failed';
-                console.error('OCR failed:', ocrResult.reason);
-
-                // Show appropriate toast based on upload success
                 if (uploadResult.status === 'fulfilled') {
                     toast({
                         title: "File Uploaded Successfully",
                         description: "Aadhaar card uploaded but OCR failed. Please enter details manually.",
-                        variant: "default"
-                    });
-                } else {
-                    toast({
-                        title: "Processing Failed",
-                        description: "Both upload and OCR failed. Please try again.",
-                        variant: "destructive"
                     });
                 }
             }
@@ -664,7 +639,7 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
                 description: "An unexpected error occurred. Please try again.",
             });
         }
-    }, [applyOCRResults, toast]);
+    }, [applyOCRResults, toast, data?.documents, onDataChange]);
 
     // Handle other document uploads
     const handleDocUpload = useCallback((docType: 'business' | 'bank') => async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -672,10 +647,17 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
         if (!file) return;
 
         try {
-            // Upload to Supabase
             const folder = docType === 'business' ? 'business-proofs' : 'bank-statements';
             const uploadPath = await uploadToSupabase(file, folder);
-            console.log(`${docType} document uploaded to:`, uploadPath);
+
+            // UPDATE PARENT WITH PATH
+            const docKey = docType === 'business' ? 'businessProof' : 'cancelledCheque';
+            onDataChange?.({
+                documents: {
+                    ...data?.documents,
+                    [docKey]: { file, path: uploadPath }
+                }
+            });
 
             if (docType === 'business') {
                 setBusinessProof(file);
@@ -695,7 +677,7 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
                 description: "Failed to upload document",
             });
         }
-    }, [toast]);
+    }, [toast, data?.documents, onDataChange]);
 
     // Handle form input changes
     const handleInputChange = useCallback((field: keyof FormData) => (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1149,4 +1131,5 @@ const MerchantRegistration: React.FC<MerchantRegistrationProps> = ({
     );
 };
 
-export {MerchantRegistration};
+export { MerchantRegistration };
+

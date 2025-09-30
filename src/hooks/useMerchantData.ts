@@ -22,7 +22,7 @@ export interface MerchantProfile {
     reviewed_at?: string | null;
     rejection_reason?: string | null;
     risk_level?: string | null;
-    onboarding_status: 'pending' | 'in_progress' | 'verified' | 'rejected' | 'approved' | 'submitted';
+    onboarding_status: 'approved' | 'verified' | 'submitted' | 'validating' | 'pending_bank_approval' | 'validation_failed' | 'bank_rejected';
     created_at: string;
     updated_at: string;
 }
