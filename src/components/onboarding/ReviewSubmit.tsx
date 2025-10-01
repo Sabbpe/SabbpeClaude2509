@@ -32,11 +32,16 @@ export const ReviewSubmit: React.FC<ReviewSubmitProps> = ({
     onDataChange({ agreementAccepted: checked });
   };
 
-  const handleSubmit = async () => {
-    if (data.agreementAccepted && !isSubmitting) {
-      await onSubmit();
-    }
-  };
+    const handleSubmit = async () => {
+        console.log('Documents state:', data.documents);
+        console.log('Has panCard?', !!data.documents?.panCard);
+        console.log('Has aadhaarCard?', !!data.documents?.aadhaarCard);
+        console.log('Has cancelledCheque?', !!data.documents?.cancelledCheque);
+
+        if (data.agreementAccepted && !isSubmitting) {
+            await onSubmit();
+        }
+    };
 
   const getUploadedDocumentCount = () => {
     const docs = data.documents;

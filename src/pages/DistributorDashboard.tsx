@@ -1,6 +1,7 @@
 // src/pages/DistributorDashboard.tsx
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -8,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Send, Users, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
+import { Send, Users, CheckCircle, XCircle, Clock, Search, LogOut } from 'lucide-react';
 
 interface MerchantData {
     id: string;
@@ -30,6 +31,7 @@ interface StatsData {
 }
 
 export default function DistributorDashboard() {
+    const navigate = useNavigate();
     const [merchants, setMerchants] = useState<MerchantData[]>([]);
     const [stats, setStats] = useState<StatsData | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -73,6 +75,20 @@ export default function DistributorDashboard() {
             });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSignOut = async () => {
+        try {
+            await supabase.auth.signOut();
+            navigate('/'); // Change from '/login' to '/' for landing page
+        } catch (error) {
+            console.error('Sign out error:', error);
+            toast({
+                title: "Error",
+                description: "Failed to sign out",
+                variant: "destructive"
+            });
         }
     };
 
@@ -160,53 +176,62 @@ export default function DistributorDashboard() {
 
     return (
         <div className="container mx-auto p-6">
+            {/* Header with Sign Out */}
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-3xl font-bold">Distributor Dashboard</h1>
                     <p className="text-muted-foreground">Manage your merchant network</p>
                 </div>
-                <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
-                    <DialogTrigger asChild>
-                        <Button>
-                            <Send className="w-4 h-4 mr-2" />
-                            Invite Merchant
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Invite New Merchant via WhatsApp</DialogTitle>
-                        </DialogHeader>
-                        <div className="space-y-4 pt-4">
-                            <div>
-                                <Label htmlFor="name">Merchant Name</Label>
-                                <Input
-                                    id="name"
-                                    value={inviteData.name}
-                                    onChange={(e) => setInviteData({ ...inviteData, name: e.target.value })}
-                                    placeholder="Enter merchant name"
-                                />
-                            </div>
-                            <div>
-                                <Label htmlFor="mobile">Mobile Number</Label>
-                                <Input
-                                    id="mobile"
-                                    value={inviteData.mobile}
-                                    onChange={(e) => setInviteData({ ...inviteData, mobile: e.target.value })}
-                                    placeholder="+91 98765 43210"
-                                />
-                            </div>
-                            <Button
-                                onClick={sendWhatsAppInvite}
-                                disabled={sending || !inviteData.name || !inviteData.mobile}
-                                className="w-full"
-                            >
-                                {sending ? 'Sending...' : 'Send WhatsApp Invite'}
+                <div className="flex gap-3">
+                    <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button>
+                                <Send className="w-4 h-4 mr-2" />
+                                Invite Merchant
                             </Button>
-                        </div>
-                    </DialogContent>
-                </Dialog>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Invite New Merchant via WhatsApp</DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-4 pt-4">
+                                <div>
+                                    <Label htmlFor="name">Merchant Name</Label>
+                                    <Input
+                                        id="name"
+                                        value={inviteData.name}
+                                        onChange={(e) => setInviteData({ ...inviteData, name: e.target.value })}
+                                        placeholder="Enter merchant name"
+                                    />
+                                </div>
+                                <div>
+                                    <Label htmlFor="mobile">Mobile Number</Label>
+                                    <Input
+                                        id="mobile"
+                                        value={inviteData.mobile}
+                                        onChange={(e) => setInviteData({ ...inviteData, mobile: e.target.value })}
+                                        placeholder="+91 98765 43210"
+                                    />
+                                </div>
+                                <Button
+                                    onClick={sendWhatsAppInvite}
+                                    disabled={sending || !inviteData.name || !inviteData.mobile}
+                                    className="w-full"
+                                >
+                                    {sending ? 'Sending...' : 'Send WhatsApp Invite'}
+                                </Button>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
+
+                    <Button variant="outline" onClick={handleSignOut}>
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Sign Out
+                    </Button>
+                </div>
             </div>
 
+            {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -249,6 +274,7 @@ export default function DistributorDashboard() {
                 </Card>
             </div>
 
+            {/* Search and Filter */}
             <div className="flex gap-4 mb-6">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -272,6 +298,7 @@ export default function DistributorDashboard() {
                 </select>
             </div>
 
+            {/* Merchants List */}
             <Card>
                 <CardHeader>
                     <CardTitle>Merchant Applications</CardTitle>

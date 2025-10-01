@@ -30,6 +30,7 @@ export interface OnboardingData {
         ifscCode: string;
         bankName: string;
         accountHolderName: string;
+        confirmAccountNumber?: string;
     };
     kycData: {
         isVideoCompleted: boolean;
@@ -193,7 +194,15 @@ const EnhancedOnboardingFlow: React.FC = () => {
 
     const handleDataChange = (newData: Partial<OnboardingData>) => {
         console.log('Updating onboarding data:', newData);
-        setOnboardingData(prev => ({ ...prev, ...newData }));
+        setOnboardingData(prev => ({
+            ...prev,
+            ...newData,
+            // Deep merge documents to avoid overwriting
+            documents: {
+                ...(prev.documents || {}),
+                ...(newData.documents || {})
+            }
+        }));
     };
 
     const saveRegistrationData = async () => {
@@ -308,7 +317,30 @@ const EnhancedOnboardingFlow: React.FC = () => {
 
     const handleFinalSubmit = async () => {
         console.log('Starting final submission with data:', onboardingData);
-        setIsSubmitting(true);
+
+        // DEBUG: Log what we're checking
+        console.log('Checking documents:', {
+            panCard: onboardingData.documents?.panCard,
+            aadhaarCard: onboardingData.documents?.aadhaarCard,
+            businessProof: onboardingData.documents?.businessProof,
+            cancelledCheque: onboardingData.documents?.cancelledCheque
+        });
+
+        // Validate required documents exist WITH PATHS
+        const requiredDocs = ['panCard', 'aadhaarCard', 'businessProof', 'cancelledCheque'];
+        const missingDocs = requiredDocs.filter(doc =>
+            !onboardingData.documents?.[doc]?.path  // Check for path, not just existence
+        );
+
+        if (missingDocs.length > 0) {
+            toast({
+                variant: "destructive",
+                title: "Missing Documents",
+                description: `Please upload: ${missingDocs.join(', ')}`,
+            });
+            console.error('Missing document paths:', missingDocs);
+            return;
+        }
 
         try {
             const validationErrors: string[] = [];

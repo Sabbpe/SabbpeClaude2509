@@ -1,4 +1,4 @@
-// src/components/onboarding/BankDetails.tsx
+// src/components/onboarding/BankDetails.tsx - FIXED VERSION WITH PROPER TYPES
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -8,25 +8,29 @@ import { Upload, CheckCircle, AlertCircle, Loader2, CreditCard, FileText } from 
 import { useToast } from '@/hooks/use-toast';
 import { useBankValidation } from '@/hooks/useBankValidation';
 import { useMerchantData } from '@/hooks/useMerchantData';
+import { supabase } from '@/lib/supabase';
+import { OnboardingData } from '@/pages/EnhancedMerchantOnboarding';
 
 export interface BankDetailsData {
-    ifscCode: string;
-    accountNumber: string;
-    confirmAccountNumber: string;
+    accountNumber: string;      // Remove '?'
+    confirmAccountNumber: string; // Remove '?'
+    ifscCode: string;           // Remove '?'
+    bankName: string;           // Remove '?'
     accountHolderName: string;
-    cancelledCheque?: File;
 }
 
 interface BankDetailsProps {
-    onNext: (data: BankDetailsData) => void;
-    onBack: () => void;
-    initialData?: Partial<BankDetailsData>;
+    onNext: () => void;
+    onPrev: () => void;
+    data?: OnboardingData;
+    onDataChange?: (data: Partial<OnboardingData>) => void;
 }
 
 export const BankDetails: React.FC<BankDetailsProps> = ({
     onNext,
-    onBack,
-    initialData
+    onPrev,
+    data,
+    onDataChange
 }) => {
     const { toast } = useToast();
     const { saveBankDetails, merchantProfile } = useMerchantData();
@@ -40,37 +44,49 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
         ifscValidation
     } = useBankValidation();
 
-    // Form state
+    // Form state - initialize from parent data
     const [formData, setFormData] = useState<BankDetailsData>({
-        ifscCode: initialData?.ifscCode || '',
-        accountNumber: initialData?.accountNumber || '',
-        confirmAccountNumber: initialData?.confirmAccountNumber || '',
-        accountHolderName: initialData?.accountHolderName || '',
-        cancelledCheque: initialData?.cancelledCheque
+        ifscCode: data?.bankDetails?.ifscCode || '',
+        accountNumber: data?.bankDetails?.accountNumber || '',
+        confirmAccountNumber: data?.bankDetails?.confirmAccountNumber || '',
+        accountHolderName: data?.bankDetails?.accountHolderName || '',
+        bankName: data?.bankDetails?.bankName || ''
     });
 
-    const [errors, setErrors] = useState<Partial<Record<keyof BankDetailsData, string>>>({});
+    const [cancelledCheque, setCancelledCheque] = useState<File | null>(
+        data?.documents?.cancelledCheque?.file || null
+    );
+    const [errors, setErrors] = useState<Partial<Record<keyof BankDetailsData | 'cancelledCheque', string>>>({});
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Clear errors when field values change
-    const clearError = (field: keyof BankDetailsData) => {
+    const clearError = (field: keyof BankDetailsData | 'cancelledCheque') => {
         if (errors[field]) {
             setErrors(prev => ({ ...prev, [field]: '' }));
         }
     };
 
-    // Handle input changes
+    // Handle input changes and update parent immediately
     const handleInputChange = (field: keyof BankDetailsData) => (
         e: React.ChangeEvent<HTMLInputElement>
     ) => {
         const value = e.target.value;
-        setFormData(prev => ({ ...prev, [field]: value }));
-        clearError(field);
+        let processedValue = value;
 
         // Special handling for IFSC code
         if (field === 'ifscCode') {
-            const cleanIFSC = value.trim().toUpperCase();
-            setFormData(prev => ({ ...prev, ifscCode: cleanIFSC }));
+            processedValue = value.trim().toUpperCase();
+        }
+
+        const newFormData: BankDetailsData = { ...formData, [field]: processedValue };
+        setFormData(newFormData);
+        clearError(field);
+
+        // ✅ UPDATE PARENT IMMEDIATELY
+        if (onDataChange) {
+            onDataChange({
+                bankDetails: newFormData
+            });
         }
     };
 
@@ -86,18 +102,26 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
                         setErrors(prev => ({ ...prev, ifscCode: result.error }));
                     } else {
                         clearError('ifscCode');
+                        // Update bank name from validation
+                        if (result.bankName) {
+                            const newFormData: BankDetailsData = { ...formData, bankName: result.bankName };
+                            setFormData(newFormData);
+                            if (onDataChange) {
+                                onDataChange({ bankDetails: newFormData });
+                            }
+                        }
                     }
                 } catch (error) {
                     console.error('IFSC validation failed:', error);
                 }
-            }, 500); // Debounce validation
+            }, 500);
 
             return () => clearTimeout(timeoutId);
         }
-    }, [formData.ifscCode, validateIfscCode]);
+    }, [formData.ifscCode]);
 
-    // Handle file upload
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ✅ FIXED: Upload file to Supabase AND update parent state
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
@@ -123,13 +147,62 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
             return;
         }
 
-        setFormData(prev => ({ ...prev, cancelledCheque: file }));
-        clearError('cancelledCheque');
+        try {
+            // Get user info for folder structure
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) {
+                throw new Error("User not authenticated");
+            }
+
+            const safePhone = user?.phone?.replace(/\D/g, "") || "unknown";
+            const userId = user.id;
+            const fileName = `${Date.now()}_${file.name}`;
+            const filePath = `${userId}_${safePhone}/cancelled-cheques/${fileName}`;
+
+            // Upload to Supabase Storage
+            const { error: uploadError } = await supabase.storage
+                .from('merchant-documents')
+                .upload(filePath, file);
+
+            if (uploadError) {
+                throw new Error('Failed to upload to storage');
+            }
+
+            // Update local state
+            setCancelledCheque(file);
+            clearError('cancelledCheque');
+
+            // ✅ CRITICAL FIX: Update parent state with document info
+            if (onDataChange) {
+                onDataChange({
+                    documents: {
+                        ...data?.documents,
+                        cancelledCheque: {
+                            file: file,
+                            path: filePath
+                        }
+                    }
+                });
+            }
+
+            toast({
+                title: "File Uploaded",
+                description: "Cancelled cheque uploaded successfully",
+            });
+
+        } catch (error) {
+            console.error('Upload error:', error);
+            toast({
+                variant: "destructive",
+                title: "Upload Failed",
+                description: error instanceof Error ? error.message : "Failed to upload file",
+            });
+        }
     };
 
     // Form validation
     const validateForm = (): boolean => {
-        const newErrors: Partial<Record<keyof BankDetailsData, string>> = {};
+        const newErrors: Partial<Record<keyof BankDetailsData | 'cancelledCheque', string>> = {};
 
         // IFSC validation
         if (!formData.ifscCode.trim()) {
@@ -157,8 +230,9 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
             newErrors.accountHolderName = 'Account holder name is required';
         }
 
-        // Cancelled cheque
-        if (!formData.cancelledCheque) {
+        // Cancelled cheque - check both local and parent state
+        const hasCheque = cancelledCheque || data?.documents?.cancelledCheque?.file;
+        if (!hasCheque) {
             newErrors.cancelledCheque = 'Cancelled cheque is required';
         }
 
@@ -189,21 +263,30 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
         setIsSubmitting(true);
 
         try {
-            // Actually save to database
+            // Save bank details to database
             await saveBankDetails({
-                merchant_id: merchantProfile.id,
                 account_number: formData.accountNumber,
                 ifsc_code: formData.ifscCode,
-                bank_name: ifscValidation.bankName || 'Unknown',
+                bank_name: formData.bankName,
                 account_holder_name: formData.accountHolderName,
             });
+
+            // Ensure parent has all the latest data before proceeding
+            if (onDataChange) {
+                onDataChange({
+                    bankDetails: {
+                        ...formData,
+                        bankName: ifscValidation.bankName || formData.bankName
+                    }
+                });
+            }
 
             toast({
                 title: "Bank Details Saved",
                 description: "Your bank information has been successfully recorded.",
             });
 
-            onNext(formData);
+            onNext();
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to save';
             toast({
@@ -241,7 +324,7 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        {/* IFSC Code - Fixed */}
+                        {/* IFSC Code */}
                         <div>
                             <Label htmlFor="ifscCode">IFSC Code *</Label>
                             <div className="relative">
@@ -266,7 +349,6 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
                                 )}
                             </div>
 
-                            {/* Dynamic message display */}
                             {showIFSCError ? (
                                 <div className="flex items-center gap-1 mt-1">
                                     <AlertCircle className="h-4 w-4 text-red-500" />
@@ -315,9 +397,6 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
                                     <p className="text-sm text-red-500">{errors.accountHolderName}</p>
                                 </div>
                             )}
-                            <p className="text-xs text-gray-500 mt-1">
-                                Name must match exactly as per your bank account
-                            </p>
                         </div>
 
                         {/* Account Number */}
@@ -380,13 +459,14 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
                                 />
                                 <label
                                     htmlFor="cancelledCheque"
-                                    className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50"
+                                    className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-gray-50 
+                                        ${errors.cancelledCheque ? 'border-red-500' : 'border-gray-300'}`}
                                 >
-                                    {formData.cancelledCheque ? (
+                                    {(cancelledCheque || data?.documents?.cancelledCheque?.file) ? (
                                         <div className="flex items-center gap-2">
                                             <CheckCircle className="h-5 w-5 text-green-600" />
                                             <span className="text-sm font-medium">
-                                                {formData.cancelledCheque.name}
+                                                {(cancelledCheque || data?.documents?.cancelledCheque?.file)?.name}
                                             </span>
                                         </div>
                                     ) : (
@@ -429,7 +509,7 @@ export const BankDetails: React.FC<BankDetailsProps> = ({
             <div className="flex justify-between pt-6">
                 <Button
                     variant="outline"
-                    onClick={onBack}
+                    onClick={onPrev}
                     disabled={isSubmitting}
                 >
                     Back
